@@ -4,7 +4,7 @@ const bodyParser = require('body-parser')
 const config = require('config')
 
 
-app.use(bodyParser.json());
+app.use(bodyParser.json()); 
 app.use(express.urlencoded({ extended: true }));
 
 
