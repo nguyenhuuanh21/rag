@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@elastic/elasticsearch": "^8.19.1",
+    "@huggingface/transformers": "^3.8.1",
     "@langchain/community": "^1.1.27",
     "@langchain/core": "^1.1.39",
     "@langchain/mongodb": "^1.1.0",

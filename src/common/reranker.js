@@ -1,16 +1,32 @@
-const { pipeline, env } = require('@xenova/transformers');
+// reranker.mjs
+const {
+  AutoTokenizer,
+  AutoModelForSequenceClassification,
+  env,
+} = require("@huggingface/transformers");
 
-env.cacheDir = 'D:\\o D\\cai dat\\sentence-transfomer';
+// set cache local
+env.cacheDir = "D:\\model";
 
-let rerankerInstance = null;
+let tokenizer = null;
+let model = null;
 
-const getReranker = async () => {
-    // Chỉ khởi tạo model nếu nó chưa tồn tại
-    if (!rerankerInstance) {
-        console.log("Đang kiểm tra và tải model reranker...");
-        rerankerInstance = await pipeline('text-ranking', 'Xenova/bge-reranker-base');
-        console.log("Khởi tạo model thành công!");
-    }
-    return rerankerInstance;
-};
+async function getReranker() {
+  if (!tokenizer || !model) {
+    console.log("⏳ Loading reranker (manual)...");
+
+    const modelName = "Xenova/bge-reranker-base";
+
+    tokenizer = await AutoTokenizer.from_pretrained(modelName);
+    model = await AutoModelForSequenceClassification.from_pretrained(
+      modelName,
+      { device: "cpu" }
+    );
+
+    console.log("✅ Reranker loaded!");
+  }
+
+  return { tokenizer, model };
+}
+
 module.exports = getReranker;
