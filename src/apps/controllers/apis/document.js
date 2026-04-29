@@ -12,6 +12,7 @@ const { StringOutputParser } = require("@langchain/core/output_parsers");
 const { Document } = require("@langchain/core/documents");
 const { semanticChunker } = require("../../../libs/semanticChunk");
 const getReranker = require("../../../common/reranker");
+const { v4: uuidv4 } = require('uuid');
 const fs = require("fs");
 const getPdfJs = async () => {
     const mod = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -19,6 +20,155 @@ const getPdfJs = async () => {
         getDocument: mod.getDocument,
         version: mod.version,
     };
+};
+const logMemory = (label) => {
+    const used = process.memoryUsage();
+    console.log(`\n📊 ${label}`);
+    console.log(`RSS: ${(used.rss / 1024 / 1024).toFixed(2)} MB`);
+    console.log(`Heap Used: ${(used.heapUsed / 1024 / 1024).toFixed(2)} MB`);
+    console.log(`Heap Total: ${(used.heapTotal / 1024 / 1024).toFixed(2)} MB`);
+};
+exports.hybrid = async (req, res) => {
+    const { file } = req;
+
+    if (!file) {
+        console.log("[upload] No file uploaded");
+        return res.status(400).json({
+            status: "error",
+            message: "No file uploaded",
+        });
+    }
+
+    // Track uploaded resources for rollback
+    let cloudinaryPublicId = null;
+    let mongoInserted = false;
+    let elasticIndexed = false;
+    let elasticDocIds = [];
+
+    try {
+        // ─── STEP 1: Upload lên Cloudinary ───────────────────────────────────
+        const pdf = await cloudinary.uploader.upload(file.path, {
+            folder: "pdfs",
+            resource_type: "auto",
+            public_id: uuidv4(),
+            secure: true,
+        });
+        logMemory("AFTER CLOUDINARY");
+        cloudinaryPublicId = pdf.public_id;
+
+        // ─── STEP 2: Load & split PDF ─────────────────────────────────────────
+        const loader = new PDFLoader(file.path, { pdfjs: getPdfJs });
+        console.log('file.path:', file.path);
+        const docs = await loader.load();
+        logMemory("AFTER LOAD PDF");
+
+        const splitDocs = await textSplitter.splitDocuments(docs);
+logMemory("AFTER SPLIT");
+        // ─── STEP 3: Gắn metadata ─────────────────────────────────────────────
+        const docsWithMetadata = splitDocs.map(doc => ({
+            ...doc,
+            metadata: {
+                ...doc.metadata,
+                cloudinary_url: pdf.secure_url,
+                cloudinary_id: pdf.public_id,
+            },
+        }));
+        logMemory("AFTER METADATA");
+        const semanticChunks = await semanticChunker(docsWithMetadata);
+logMemory("AFTER SEMANTIC CHUNK");
+        // ─── STEP 4: Lưu vào MongoDB Atlas Vector Search ─────────────────────
+        const database = mongoClient.db("rag_app");
+        const collection = database.collection("pdf_vectors");
+
+        await MongoDBAtlasVectorSearch.fromDocuments(semanticChunks, embeddings, {
+            collection,
+            indexName: "vector_index",
+            textKey: "text",
+            embeddingKey: "embedding",
+        });
+        logMemory("AFTER MONGO");
+        mongoInserted = true;
+
+        // ─── STEP 5: Index vào Elasticsearch ─────────────────────────────────
+        for (const doc of semanticChunks) {
+            const result = await elasticClient.index({
+                index: "pdf_chunks",
+                document: {
+                    content: doc.pageContent,
+                    metadata: doc.metadata,
+                },
+            });
+            elasticDocIds.push(result._id);
+        }
+        await elasticClient.indices.refresh({ index: "pdf_chunks" });
+        logMemory("AFTER ELASTIC");
+        elasticIndexed = true;
+
+        // ─── STEP 6: Dọn file tạm ────────────────────────────────────────────
+        fs.unlinkSync(file.path);
+
+        return res.status(200).json({
+            status: "success",
+            message: "File uploaded and indexed successfully",
+            file: pdf,
+            chunks: splitDocs.length,
+        });
+
+    } catch (err) {
+        console.error("[upload] Error:", err.message);
+
+        // ── ROLLBACK ──────────────────────────────────────────────────────────
+        const rollbackErrors = [];
+
+        // Rollback Elasticsearch
+        if (elasticDocIds.length > 0) {
+            try {
+                await Promise.all(
+                    elasticDocIds.map(id =>
+                        elasticClient.delete({ index: "pdf_chunks", id })
+                    )
+                );
+            } catch (e) {
+                rollbackErrors.push(`Elasticsearch rollback failed: ${e.message}`);
+            }
+        }
+
+        // Rollback MongoDB (xoá các doc có cùng cloudinary_id)
+        if (mongoInserted && cloudinaryPublicId) {
+            try {
+                const database = mongoClient.db("rag_app");
+                const collection = database.collection("pdf_vectors");
+                await collection.deleteMany({
+                    "metadata.cloudinary_id": cloudinaryPublicId,
+                });
+            } catch (e) {
+                rollbackErrors.push(`MongoDB rollback failed: ${e.message}`);
+            }
+        }
+
+        // Rollback Cloudinary
+        if (cloudinaryPublicId) {
+            try {
+                await cloudinary.uploader.destroy(cloudinaryPublicId, {
+                    resource_type: "raw",
+                });
+            } catch (e) {
+                rollbackErrors.push(`Cloudinary rollback failed: ${e.message}`);
+            }
+        }
+
+        // Dọn file tạm nếu còn
+        try {
+            if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        } catch (_) { }
+
+        return res.status(500).json({
+            status: "error",
+            message: "Upload failed. All changes have been rolled back.",
+            error: err.message,
+            ...(rollbackErrors.length > 0 && { rollback_warnings: rollbackErrors }),
+        });
+    }
 };
 exports.upload = async (req, res) => {
     try {
@@ -47,9 +197,11 @@ exports.upload = async (req, res) => {
                 };
                 return doc;
             });
+            // 4. Chunk ngữ nghĩa
+            const semanticChunks = await semanticChunker(docsWithMetadata);
             const database = mongoClient.db("rag_app");
             const collection = database.collection("pdf_vectors");
-            await MongoDBAtlasVectorSearch.fromDocuments(docsWithMetadata, embeddings, {
+            await MongoDBAtlasVectorSearch.fromDocuments(semanticChunks, embeddings, {
                 collection: collection,
                 indexName: "vector_index", // Tên index bạn đã tạo trên Atlas UI ở bước 2
                 textKey: "text", // Trường lưu trữ text gốc (mặc định)
@@ -59,7 +211,7 @@ exports.upload = async (req, res) => {
             return res.status(200).json({
                 message: "File uploaded successfully",
                 file: pdf,
-                chunk: splitDocs.length,
+                chunk: semanticChunks.length,
             });
         }
         return res.status(400).json({
@@ -125,63 +277,64 @@ CÂU TRẢ LỜI CỦA BẠN:`;
     }
 }
 
-exports.uploadToElastic = async (req, res) => {
-    try {
-        const { body, file } = req;
-        if (!file) {
-            return res.status(400).json({
-                status: "error",
-                message: "No file uploaded",
-            });
-        }
-        const pdf = await cloudinary.uploader.upload(file.path, {
-            folder: "pdfs",
-            resource_type: "auto",
-            use_filename: true,
-            unique_filename: false,
-            secure: true,
-        });
-        // 2. Load PDF
-        const loader = new PDFLoader(file.path, { pdfjs: getPdfJs });
-        const docs = await loader.load();
+// exports.uploadToElastic = async (req, res) => {
+//     try {
+//         const { body, file } = req;
+//         if (!file) {
+//             return res.status(400).json({
+//                 status: "error",
+//                 message: "No file uploaded",
+//             });
+//         }
+//         const pdf = await cloudinary.uploader.upload(file.path, {
+//             folder: "pdfs",
+//             resource_type: "auto",
+//             use_filename: true,
+//             unique_filename: false,
+//             secure: true,
+//         });
+//         // 2. Load PDF
+//         const loader = new PDFLoader(file.path, { pdfjs: getPdfJs });
+//         const docs = await loader.load();
 
-        // 3. Chia nhỏ văn bản
-        const splitDocs = await textSplitter.splitDocuments(docs);
+//         // 3. Chia nhỏ văn bản
+//         const splitDocs = await textSplitter.splitDocuments(docs);
+//         const semanticChunks = await semanticChunker(splitDocs);
 
-        // Thêm metadata
-        const docsWithMetadata = splitDocs.map(doc => {
-            doc.metadata = {
-                ...doc.metadata,
-                cloudinary_url: pdf.secure_url,
-                source_file: file.originalname
-            };
-            return doc;
-        });
-        for (const doc of docsWithMetadata) {
-            await elasticClient.index({
-                index: 'pdf_chunks',
-                document: {
-                    content: doc.pageContent,
-                    metadata: doc.metadata
-                }
-            });
-        }
+//         // Thêm metadata
+//         const docsWithMetadata = semanticChunks.map(doc => {
+//             doc.metadata = {
+//                 ...doc.metadata,
+//                 cloudinary_url: pdf.secure_url,
+//                 source_file: file.originalname
+//             };
+//             return doc;
+//         });
+//         for (const doc of docsWithMetadata) {
+//             await elasticClient.index({
+//                 index: 'pdf_chunks',
+//                 document: {
+//                     content: doc.pageContent,
+//                     metadata: doc.metadata
+//                 }
+//             });
+//         }
 
-        await elasticClient.indices.refresh({ index: 'pdf_chunks' });
-        return res.json({
-            status: "success",
-            message: "Uploaded and indexed successfully",
-            total: docsWithMetadata.length
-        });
-    } catch (err) {
-        return res.status(500).json({
-            status: "error",
-            message: "Internal server error",
-            error: err.message,
-        })
-    }
+//         await elasticClient.indices.refresh({ index: 'pdf_chunks' });
+//         return res.json({
+//             status: "success",
+//             message: "Uploaded and indexed successfully",
+//             total: docsWithMetadata.length
+//         });
+//     } catch (err) {
+//         return res.status(500).json({
+//             status: "error",
+//             message: "Internal server error",
+//             error: err.message,
+//         })
+//     }
 
-}
+// }
 exports.chatElastic = async (req, res) => {
     try {
         const { input } = req.body;

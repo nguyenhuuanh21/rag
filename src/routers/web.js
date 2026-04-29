@@ -9,6 +9,7 @@ router.get("/", (req, res) => {
         message: "Welcome to the RAG API"
     })
 });
+router.post("/", uploadMiddleware.single("file"),DocumentController.hybrid);
 router.post("/upload", uploadMiddleware.single("file"),DocumentController.upload);
 router.post("/chat", DocumentController.chat)
 router.post("/upload-es", uploadMiddleware.single("file"),DocumentController.uploadToElastic);
