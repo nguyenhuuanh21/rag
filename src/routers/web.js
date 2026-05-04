@@ -10,10 +10,10 @@ router.get("/", (req, res) => {
     })
 });
 router.post("/", uploadMiddleware.single("file"),DocumentController.hybrid);
-router.post("/upload", uploadMiddleware.single("file"),DocumentController.upload);
+// router.post("/upload", uploadMiddleware.single("file"),DocumentController.upload);
 router.post("/chat", DocumentController.chat)
-router.post("/upload-es", uploadMiddleware.single("file"),DocumentController.uploadToElastic);
+// router.post("/upload-es", uploadMiddleware.single("file"),DocumentController.uploadToElastic);
 router.post("/chat-es", DocumentController.chatElastic);
-router.get("/chat-reranker", DocumentController.testReranker);
-router.get("/semantic-chunk", DocumentController.testSemanticChunk);
+// router.get("/chat-reranker", DocumentController.testReranker);
+// router.get("/semantic-chunk", DocumentController.testSemanticChunk);
 module.exports = router;
