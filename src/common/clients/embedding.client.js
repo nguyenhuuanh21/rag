@@ -4,3 +4,5 @@ const embeddings = new OllamaEmbeddings({
   baseUrl: "http://localhost:11434",
 });
 module.exports = embeddings;
+
+
