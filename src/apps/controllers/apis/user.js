@@ -72,10 +72,10 @@ exports.login = async (req, res) => {
 
     //response token & user info
     res.cookie("refreshToken", refreshToken, {
-      httpOnly: false,
+      httpOnly: true,
       secure: true,
-      sameSite: "strict",
-      maxAge: 24 * 60 * 60 * 1000, // 1 day
+      sameSite: "None",
+      maxAge: 24 * 60 * 60 * 1000,
     });
     return res.status(200).json({
       status: "success",
