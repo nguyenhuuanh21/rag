@@ -10,6 +10,7 @@
   "dependencies": {
     "@elastic/elasticsearch": "^8.19.1",
     "@google/generative-ai": "^0.24.1",
+    "@langchain/google-genai": "^2.1.31",
     "@langchain/mongodb": "^1.1.0",
     "@langchain/ollama": "^1.2.6",
     "bcrypt": "^6.0.0",

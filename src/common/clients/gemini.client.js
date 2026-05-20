@@ -1,8 +1,9 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { GoogleGenerativeAIEmbeddings } = require("@langchain/google-genai");
 
-const gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-const visionModel = gemini.getGenerativeModel({
-  model: "gemini-2.5-flash",
+const embeddingModel = new GoogleGenerativeAIEmbeddings({
+    apiKey: process.env.GEMINI_API_KEY,
+    model: "gemini-embedding-001",
+    taskType: "RETRIEVAL_DOCUMENT",
 });
-module.exports = visionModel
+
+module.exports = embeddingModel; 

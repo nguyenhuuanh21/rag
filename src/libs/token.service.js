@@ -3,7 +3,7 @@ const {addTokenBlacklist}=require("./redis.token")
 exports.storeUserToken = async (userId,accessToken,refreshToken) => {
     const token = await TokenModel.findOne({ userId })
     if (token) {
-        this.deleteUserToken(userId);
+        await this.deleteUserToken(userId);
     }
     await TokenModel({
         userId,

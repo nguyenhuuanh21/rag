@@ -5,7 +5,7 @@ exports.generateAccessToken = async (payload) => await jwt.sign(
         email: payload.email
     },
     process.env.JWT_ACCESS_KEY,
-    {expiresIn:'1h'}
+    {expiresIn:'30s'}
 )
 exports.generateRefreshToken = async (payload) => await jwt.sign(
     {

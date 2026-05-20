@@ -15,7 +15,7 @@ exports.verifyAccessToken = async (req, res, next) => {
     if (isTokenBlacklisted) {
       return res.status(401).json({
         status: "error",
-        message: "The token has been revoked",
+        message: "access token has been revoked",
       })
     }
     jwt.verify(token, process.env.JWT_ACCESS_KEY, async (err, decoded) => {
@@ -32,6 +32,7 @@ exports.verifyAccessToken = async (req, res, next) => {
             message: "Invalid access token",
           });
         }
+        return res.status(401).json({ status: "error", message: "Invalid token" });
       }
       // console.log(decoded);
       //{
@@ -68,7 +69,7 @@ exports.verifyRefreshToken = async (req, res, next) => {
     if (isTokenBlacklisted) {
       return res.status(401).json({
         status: "error",
-        message: "The token has been revoked",
+        message: "refresh token has been revoked",
       })
     }
     jwt.verify(token, process.env.JWT_REFRESH_KEY, async (err, decoded) => {
@@ -85,6 +86,7 @@ exports.verifyRefreshToken = async (req, res, next) => {
             message: "Invalid refresh token",
           });
         }
+        return res.status(401).json({ status: "error", message: "Invalid token" });
       }
       req.decoded = decoded;
       next();

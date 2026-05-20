@@ -1,6 +1,16 @@
 const TokenModel = require('../apps/models/token');
 const {jwtDecode} = require('jwt-decode');
 const redisClient  = require('../common/connections/redis.connection');
+exports.revokeAccessToken = async (userId) => {
+    const token = await TokenModel.findOne({ userId });
+    if (!token) return;
+    const decoded = jwtDecode(token.accessToken);
+    if (decoded.exp > Date.now() / 1000) {
+        await redisClient.set(`tb_${token.accessToken}`, 'revoked', {
+            EXAT: decoded.exp
+        });
+    }
+};
 exports.addTokenBlacklist = async (userId) => {
     const token = await TokenModel.findOne({ userId });
     if (!token) {

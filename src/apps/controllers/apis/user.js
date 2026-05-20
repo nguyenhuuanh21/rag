@@ -2,7 +2,9 @@ const bcrypt = require("bcrypt");
 const { validationResult } = require("express-validator");
 const UserModel = require("../../models/user");
 const jwt = require("../../../libs/jwt");
-const {deleteUserToken, storeUserToken} = require("../../../libs/token.service");
+const { deleteUserToken, storeUserToken } = require("../../../libs/token.service");
+const { revokeAccessToken } = require("../../../libs/redis.token");
+const TokenModel = require("../../models/token");
 exports.register = async (req, res) => {
   try {
     // Validate form
@@ -66,9 +68,9 @@ exports.login = async (req, res) => {
     const refreshToken = await jwt.generateRefreshToken(isEmail);
     const { password, ...others } = isEmail.toObject();
     //insert token to db
-    storeUserToken(others._id, accessToken, refreshToken);
+    await storeUserToken(others._id, accessToken, refreshToken);
 
-    //response token & customer info
+    //response token & user info
     res.cookie("refreshToken", refreshToken, {
       httpOnly: false,
       secure: true,
@@ -78,7 +80,7 @@ exports.login = async (req, res) => {
     return res.status(200).json({
       status: "success",
       message: "Login successfully",
-      customer: others,
+      user: others,
       accessToken: accessToken,
     });
   } catch (error) {
@@ -95,10 +97,12 @@ exports.logout = async (req, res) => {
     //delete token in db
     const { user } = req;
     await deleteUserToken(user.id);
+    res.clearCookie("refreshToken");
     return res.status(200).json({
       status: "success",
       message: "Logout successfully",
     })
+
   } catch (error) {
     return res.status(500).json({
       status: "error",
@@ -110,7 +114,10 @@ exports.logout = async (req, res) => {
 exports.refreshToken = async (req, res) => {
   try {
     const { decoded } = req
+    await revokeAccessToken(decoded.id)
     const accessToken = await jwt.generateAccessToken(decoded)
+    await TokenModel.updateOne({ userId: decoded.id }, { accessToken });
+
     return res.status(200).json({
       status: "success",
       message: "Generate access token successfully",

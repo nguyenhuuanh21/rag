@@ -14,6 +14,7 @@ router.get("/", (req, res) => {
 router.post("/chat",verifyAccessToken,DocumentController.chatHybrid);
 router.post("/insert",DocumentController.insertData);
 router.get("/get-chat-history",verifyAccessToken,DocumentController.getChatHistory);
+router.delete("/clear-chat-history",verifyAccessToken,DocumentController.clearChatHistory);
 //user routes
 router.post("/register",registerRules,UserController.register);
 router.post("/login",UserController.login);
