@@ -9,14 +9,17 @@ module.exports = async (template, payload) => {
 
     const msg = {
       to: payload.email,
-      from: process.env.MAIL_FROM, 
+      from: {
+        name: process.env.MAIL_FROM_NAME || "SoTaySinhVien",
+        email: process.env.MAIL_FROM
+      },
       subject: payload.subject,
       html: html,
     };
 
     const info = await sgMail.send(msg);
     return info;
-    
+
   } catch (error) {
     console.error("Lỗi khi gửi email qua SendGrid:", error);
     if (error.response) {
