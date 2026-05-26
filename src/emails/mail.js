@@ -10,11 +10,17 @@ const ejs = require('ejs');
 //   },
 // });
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: process.env.MAIL_HOST,
+  port: Number(process.env.MAIL_PORT),
+  secure: process.env.MAIL_SECURE === "true",
   auth: {
     user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASS,
+    pass: process.env.MAIL_PASS, 
   },
+  tls: {
+    rejectUnauthorized: false
+  },
+  family: 4 
 });
 module.exports = async (template, payload) => {
   const html = await ejs.renderFile(template, { payload: payload })
