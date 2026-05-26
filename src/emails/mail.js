@@ -1,33 +1,27 @@
-const nodemailer = require("nodemailer");
+const sgMail = require('@sendgrid/mail');
 const ejs = require('ejs');
-// const transporter = nodemailer.createTransport({
-//   host: process.env.MAIL_HOST,
-//   port: Number(process.env.MAIL_PORT),
-//   secure: process.env.MAIL_SECURE === "true",
-//   auth: {
-//     user: process.env.MAIL_USER,
-//     pass: process.env.MAIL_PASS,
-//   },
-// });
-const transporter = nodemailer.createTransport({
-  host: process.env.MAIL_HOST,
-  port: Number(process.env.MAIL_PORT),
-  secure: process.env.MAIL_SECURE === "true",
-  auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASS, 
-  },
-  tls: {
-    rejectUnauthorized: false
-  },
-  family: 4 
-});
+
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
 module.exports = async (template, payload) => {
-  const html = await ejs.renderFile(template, { payload: payload })
-  const info = await transporter.sendMail({
-    from: process.env.MAIL_FROM, // sender address
-    to: payload.email,
-    subject: payload.subject,
-    html: html, // HTML body
-  });
+  try {
+    const html = await ejs.renderFile(template, { payload: payload });
+
+    const msg = {
+      to: payload.email,
+      from: process.env.MAIL_FROM, 
+      subject: payload.subject,
+      html: html,
+    };
+
+    const info = await sgMail.send(msg);
+    return info;
+    
+  } catch (error) {
+    console.error("Lỗi khi gửi email qua SendGrid:", error);
+    if (error.response) {
+      console.error(error.response.body);
+    }
+    throw error;
+  }
 };

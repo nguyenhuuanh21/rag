@@ -15,6 +15,7 @@
     "@langchain/core": "^1.1.47",
     "@langchain/google-genai": "^2.1.31",
     "@langchain/mongodb": "^1.1.0",
+    "@sendgrid/mail": "^8.1.6",
     "bcrypt": "^6.0.0",
     "cloudinary": "^2.9.0",
     "config": "^4.1.1",
@@ -30,7 +31,6 @@
     "mongodb": "^7.1.1",
     "mongoose": "^6.13.8",
     "multer": "^2.1.1",
-    "nodemailer": "^8.0.8",
     "openai": "^6.37.0",
     "redis": "^5.12.1",
     "uuid": "^14.0.0"

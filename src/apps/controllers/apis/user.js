@@ -174,14 +174,21 @@ exports.forgotPassword = async (req, res) => {
       otp,
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     });
-    await sendMail("src/emails/templates/mailOtp.ejs", {
+    const info = await sendMail("src/emails/templates/mailOtp.ejs", {
       email,
-      subject: "Khôi phục mật khẩu - OTP của bạn", 
+      subject: "Khôi phục mật khẩu - OTP của bạn",
       otp,
     });
+    if (!info || info[0].statusCode !== 202) {
+      return res.status(500).json({
+        status: "error",
+        message: "Lỗi khi gửi email OTP",
+        error: info,
+      });
+    }
     return res.status(200).json({
       status: "success",
-      message: "OTP sent successfully",
+      message: "OTP đã được gửi đến email của bạn, vui lòng kiểm tra hộp thư",
     });
   } catch (error) {
     return res.status(500).json({
