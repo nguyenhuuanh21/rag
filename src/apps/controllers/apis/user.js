@@ -5,6 +5,10 @@ const jwt = require("../../../libs/jwt");
 const { deleteUserToken, storeUserToken } = require("../../../libs/token.service");
 const { revokeAccessToken } = require("../../../libs/redis.token");
 const TokenModel = require("../../models/token");
+const OtpModel = require("../../models/otp");
+const crypto = require('crypto');
+const sendMail = require("../../../emails/mail");
+const jwtLib = require("jsonwebtoken");
 exports.register = async (req, res) => {
   try {
     // Validate form
@@ -49,6 +53,15 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { body } = req;
+    // Validate form
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: "error",
+        message: "Validator user",
+        errors: errors.array(),
+      });
+    }
     const isEmail = await UserModel.findOne({ email: body.email });
     if (!isEmail) {
       return res.status(400).json({
@@ -124,6 +137,134 @@ exports.refreshToken = async (req, res) => {
       accessToken: accessToken,
     })
   } catch (error) {
+    return res.status(500).json({
+      status: "error",
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const user = await UserModel.findOne({ email });
+    if (!user) {
+      return res.status(400).json({
+        status: "error",
+        message: "email không tồn tại",
+      });
+    }
+    const existingOtp = await OtpModel.findOne({ email });
+    if (existingOtp) {
+      const remainingMs = existingOtp.expiresAt - Date.now();
+      if (remainingMs > 0) {
+        const remainingSeconds = Math.ceil(remainingMs / 1000);
+        const minutes = Math.floor(remainingSeconds / 60);
+        const seconds = remainingSeconds % 60;
+        return res.status(429).json({
+          status: "error",
+          message: `OTP đã được gửi, vui lòng thử lại sau ${minutes} phút ${seconds} giây`,
+        });
+      }
+      await OtpModel.deleteOne({ email });
+    }
+    const otp = crypto.randomInt(100000, 999999).toString();
+    await OtpModel.create({
+      email,
+      otp,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
+    await sendMail("src/emails/templates/mailOtp.ejs", {
+      email,
+      subject: "Khôi phục mật khẩu - OTP của bạn", 
+      otp,
+    });
+    return res.status(200).json({
+      status: "success",
+      message: "OTP sent successfully",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: "error",
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+}
+exports.verifyOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    const storedOtp = await OtpModel.findOne({ email, otp });
+    if (!storedOtp) {
+      return res.status(400).json({
+        status: "error",
+        message: "OTP không  đúng",
+      });
+    }
+    if (storedOtp.expiresAt < new Date()) {
+      await OtpModel.deleteOne({ email, otp });
+      return res.status(400).json({
+        status: "error",
+        message: "OTP đã hết hạn, vui lòng yêu cầu OTP mới",
+      });
+    }
+    await OtpModel.deleteOne({ email, otp });
+    const resetToken = jwtLib.sign(
+      { email },
+      process.env.JWT_SECRET_KEY,
+      { expiresIn: '15m' }
+    );
+
+    res.cookie('resetToken', resetToken, {
+      httpOnly: true,
+      secure: false, // true nếu dùng HTTPS
+      sameSite: 'strict',
+      maxAge: 15 * 60 * 1000,
+    });
+    return res.status(200).json({
+      status: "success",
+      message: "OTP verified successfully",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: "error",
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+}
+exports.resetPassword = async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    const resetToken = req.cookies?.resetToken;
+    if (!resetToken) {
+      return res.status(401).json({
+        status: "error",
+        message: "vui lòng xác thực OTP trước khi đặt lại mật khẩu",
+      });
+    }
+    const decoded = jwtLib.verify(resetToken, process.env.JWT_SECRET_KEY);
+    const user = await UserModel.findOne({ email: decoded.email });
+    if (!user) {
+      return res.status(400).json({
+        status: "error",
+        message: "email không tồn tại",
+      });
+    }
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+    res.clearCookie('resetToken');
+    return res.status(200).json({
+      status: "success",
+      message: "Đặt lại mật khẩu thành công",
+    });
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        status: "error",
+        message: "Reset token is invalid or expired",
+      });
+    }
     return res.status(500).json({
       status: "error",
       message: "Internal server error",

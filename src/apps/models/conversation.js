@@ -16,21 +16,30 @@ const messageSchema = new mongoose.Schema(
             default: Date.now,
         },
     },
-    { _id: false }
 );
 
 const conversationSchema = new mongoose.Schema(
     {
         userId: {
-            type: mongoose.Schema.Types.ObjectId,
+            type: mongoose.Schema.Types.ObjectId, 
             ref: "Users",
             required: true,
-            unique: true,
+        },
+        name: {
+            type: String,
+            default: "Cuộc trò chuyện mới",
+            required: true,
         },
         messages: {
             type: [messageSchema],
             default: [],
         },
+        lastUsedChunks: [
+            {
+                content: String,
+                pages: [Number]
+            }
+        ],
         lastActiveAt: {
             type: Date,
             default: Date.now,
@@ -39,6 +48,7 @@ const conversationSchema = new mongoose.Schema(
     },
     { timestamps: true }
 );
+conversationSchema.index({ name: "text", "messages.content": "text" });
 const ConversationModel = mongoose.model(
     "Conversations",
     conversationSchema,
