@@ -224,9 +224,9 @@ exports.verifyOtp = async (req, res) => {
 
     res.cookie('resetToken', resetToken, {
       httpOnly: true,
-      secure: false, // true nếu dùng HTTPS
-      sameSite: 'strict',
-      maxAge: 15 * 60 * 1000,
+      secure: true,
+      sameSite: 'none',
+      maxAge: 15 * 60 * 1000, // 15 phút
     });
     return res.status(200).json({
       status: "success",
