@@ -1,11 +1,9 @@
-// ============================================================
+
 // reranker.client.js — Jina Reranker v2 (multilingual)
-//
-// Cải tiến so với bản cũ:
 //   1. Retry tự động khi gặp lỗi 429 (rate limit) hoặc lỗi mạng
 //   2. Timeout 30 giây để không bị treo vô hạn
 //   3. Exponential backoff: lần retry 1 chờ 2s, lần 2 chờ 4s, lần 3 chờ 8s
-// ============================================================
+
 
 const MAX_RETRIES = 3;           // Số lần retry tối đa
 const BASE_DELAY_MS = 2000;      // Thời gian chờ cơ bản giữa các lần retry (ms)
@@ -14,14 +12,6 @@ const TIMEOUT_MS = 30_000;       // Timeout mỗi request (30 giây)
 // delay(ms) — trả về Promise chờ đúng ms milliseconds
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * Gọi Jina Reranker API để sắp xếp lại các đoạn văn theo độ liên quan.
- *
- * @param {string}   query     — Câu hỏi của người dùng
- * @param {string[]} documents — Danh sách các đoạn văn cần rerank
- * @param {number}   top_n     — Số lượng kết quả muốn giữ lại
- * @returns {{ results: Array<{ index: number, relevance_score: number }> }}
- */
 async function rerank(query, documents, top_n = 2) {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         // AbortController để ngắt request nếu quá TIMEOUT_MS

@@ -7,7 +7,13 @@ const redisClient = require('../common/connections/redis.connection')
 
 app.use(cors({
     origin: (origin, callback) => {
-    if (!origin || ["http://localhost:5173", 'https://rag-hdkvpcupz-anhs-projects-68c67cb7.vercel.app','https://rag-fe-theta.vercel.app'].includes(origin)) {
+    if (!origin || [
+      "http://localhost:5173",
+      'https://rag-hdkvpcupz-anhs-projects-68c67cb7.vercel.app',
+      'https://rag-fe-theta.vercel.app',
+      'https://rag-fe-admin.vercel.app',
+      'https://rag-fe-user.vercel.app'
+    ].includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error("Not allowed by CORS"));

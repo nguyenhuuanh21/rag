@@ -1,6 +1,7 @@
 const bcrypt = require("bcrypt");
 const { validationResult } = require("express-validator");
 const UserModel = require("../../models/user");
+const AdminModel = require("../../models/admin");
 const jwt = require("../../../libs/jwt");
 const { deleteUserToken, storeUserToken } = require("../../../libs/token.service");
 const { revokeAccessToken } = require("../../../libs/redis.token");
@@ -23,11 +24,13 @@ exports.register = async (req, res) => {
     // Validate unique email
     const { fullName, email, password } = req.body;
     const emailExists = await UserModel.findOne({ email });
-    if (emailExists)
+    const emailAdminExists = await AdminModel.findOne({ email });
+    if (emailExists || emailAdminExists)
       return res.status(400).json({
         status: "error",
         message: "Email already exists",
       });
+
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);

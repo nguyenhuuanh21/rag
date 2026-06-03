@@ -1,0 +1,7 @@
+PyMuPDF
+numpy
+Pillow
+easyocr
+torch
+torchvision
+opencv-python-headless
