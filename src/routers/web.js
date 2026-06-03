@@ -6,7 +6,7 @@ const UserController = require("../apps/controllers/apis/user");
 
 const AdminController = require("../apps/controllers/apis/admin");
 const { registerRules, loginRules } = require("../apps/middlewares/userValidator");
-const { registerAdminRules, loginAdminRules } = require("../apps/middlewares/adminvalidate");
+const { registerAdminRules, loginAdminRules } = require("../apps/middlewares/adminValidate");
 const { verifyAccessToken, verifyRefreshToken } = require('../apps/middlewares/userAuth');
 const {verifyAccessTokenAdmin,verifyRefreshTokenAdmin } = require('../apps/middlewares/adminAuth');
 const rateLimiter = require('../apps/middlewares/rateLimiter');
