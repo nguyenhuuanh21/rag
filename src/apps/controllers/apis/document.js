@@ -23,39 +23,38 @@ const vectorStore = new MongoDBAtlasVectorSearch(embeddingModel, {
     textKey: "text",
     embeddingKey: "embedding",
 });
-exports.indexing = async (req, res) => {
-    const session = mongoClient.startSession();
-    let uploadedCloudinaryFile = null;
 
+exports.indexing = async (req, res) => {
+    const session = await mongoose.startSession();
+    let uploadedCloudinaryFile = null;
     try {
         session.startTransaction();
-
         const { body, file } = req;
-
+        
         if (!file) {
             await session.abortTransaction();
             return res.status(400).json({ status: "error", message: "File không được để trống" });
         }
         const pdfPath = file.path;
 
+        // Dùng session với Mongoose Model
         const isNameExist = await documentModel.findOne({ name: body.name }).session(session);
         if (isNameExist) {
             await session.abortTransaction();
             return res.status(400).json({ status: "error", message: "Tên tài liệu đã tồn tại, vui lòng chọn tên khác" });
         }
 
-        // 2. Upload lên Cloudinary
         uploadedCloudinaryFile = await cloudinary.uploader.upload(pdfPath, {
             folder: "pdfs",
             resource_type: "auto",
             secure: true,
         });
+
         const [document] = await documentModel.create([{
             name: body.name,
             cloudinary_link: uploadedCloudinaryFile.secure_url,
         }], { session });
 
-        // 4. Gọi Python xử lý Chunking
         const scriptPath = path.join(__dirname, '../../../python_scripts/chunk.py');
         const pythonCmd = process.platform === "win32" ? "python" : "python3";
 
@@ -78,9 +77,10 @@ exports.indexing = async (req, res) => {
                 chunk_id: chunk.chunk_id,
             },
         }));
-
         console.log(`[insertData] ${documents.length} documents sẵn sàng`);
         const BATCH_SIZE = 10;
+        const nativeCollection = mongoose.connection.collection('chunks');
+
         for (let i = 0; i < documents.length; i += BATCH_SIZE) {
             const batch = documents.slice(i, i + BATCH_SIZE);
             const batchNum = Math.floor(i / BATCH_SIZE) + 1;
@@ -97,11 +97,9 @@ exports.indexing = async (req, res) => {
                 embedding: embeddings[index]
             }));
 
-            await _collection.insertMany(mongoDocs, { session });
+            await nativeCollection.insertMany(mongoDocs, { session });
         }
         console.log("[insertData] MongoDB done");
-
-        // 6. Index vào Elasticsearch
         for (const doc of documents) {
             await elasticClient.index({
                 index: "sotay",
@@ -116,7 +114,6 @@ exports.indexing = async (req, res) => {
             document: document,
             total_chunks: chunksArray.length
         });
-
     } catch (err) {
         console.error("[indexing] Error:", err.message);
         await session.abortTransaction();
@@ -128,11 +125,12 @@ exports.indexing = async (req, res) => {
                 console.error("[Rollback Failed] Không thể xóa file Cloudinary:", cloudErr.message);
             }
         }
-        return res.status(500).json({
-            status: "error",
-            message: "Lưu file thành công nhưng trích xuất Chunk thất bại",
-            error: err.message
+        return res.status(500).json({ 
+            status: "error", 
+            message: "Lưu file thành công nhưng trích xuất Chunk thất bại", 
+            error: err.message 
         });
+
     } finally {
         await session.endSession();
         if (req.file && fs.existsSync(req.file.path)) {
@@ -140,6 +138,7 @@ exports.indexing = async (req, res) => {
         }
     }
 };
+
 //xong
 exports.getDocuments = async (req, res) => {
     try {
