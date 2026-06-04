@@ -24,115 +24,156 @@ const vectorStore = new MongoDBAtlasVectorSearch(embeddingModel, {
     embeddingKey: "embedding",
 });
 
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+
 exports.indexing = async (req, res) => {
-    const session = await mongoose.startSession();
     let uploadedCloudinaryFile = null;
     try {
-        session.startTransaction();
         const { body, file } = req;
         
         if (!file) {
-            await session.abortTransaction();
             return res.status(400).json({ status: "error", message: "File không được để trống" });
         }
         const pdfPath = file.path;
 
-        // Dùng session với Mongoose Model
-        const isNameExist = await documentModel.findOne({ name: body.name }).session(session);
+        const isNameExist = await documentModel.findOne({ name: body.name });
         if (isNameExist) {
-            await session.abortTransaction();
             return res.status(400).json({ status: "error", message: "Tên tài liệu đã tồn tại, vui lòng chọn tên khác" });
         }
-
+        console.log(`[indexing] Bắt đầu xử lý file: ${body.name}`);
+        
         uploadedCloudinaryFile = await cloudinary.uploader.upload(pdfPath, {
             folder: "pdfs",
             resource_type: "auto",
             secure: true,
         });
 
-        const [document] = await documentModel.create([{
-            name: body.name,
-            cloudinary_link: uploadedCloudinaryFile.secure_url,
-        }], { session });
+        const preGeneratedDocumentId = new mongoose.Types.ObjectId();
 
         const scriptPath = path.join(__dirname, '../../../python_scripts/chunk.py');
         const pythonCmd = process.platform === "win32" ? "python" : "python3";
-
-        const { stdout, stderr } = await execFileAsync(pythonCmd, [scriptPath, pdfPath], {
+        const { stdout } = await execFileAsync(pythonCmd, [scriptPath, pdfPath], {
             maxBuffer: 1024 * 1024 * 50
         });
 
         const startIndex = stdout.indexOf('[');
-        if (startIndex === -1) {
-            throw new Error("Không tìm thấy mảng JSON trong kết quả trả về từ Python");
-        }
-        const cleanJsonString = stdout.substring(startIndex);
-        const chunksArray = JSON.parse(cleanJsonString);
-        console.log(`Đã trích xuất thành công ${chunksArray.length} chunks!`);
+        if (startIndex === -1) throw new Error("Không tìm thấy mảng JSON từ kết quả Python");
+        const chunksArray = JSON.parse(stdout.substring(startIndex));
+        
+        const BATCH_SIZE = 12; 
+        let finalMongoDocs = [];
+        let finalElasticDocs = [];
 
-        const documents = chunksArray.map((chunk) => ({
-            pageContent: chunk.content,
-            metadata: {
-                document_id: document._id.toString(),
-                chunk_id: chunk.chunk_id,
-            },
-        }));
-        console.log(`[insertData] ${documents.length} documents sẵn sàng`);
-        const BATCH_SIZE = 10;
-        const nativeCollection = mongoose.connection.collection('chunks');
-
-        for (let i = 0; i < documents.length; i += BATCH_SIZE) {
-            const batch = documents.slice(i, i + BATCH_SIZE);
+        console.log(`[Embedding] Bắt đầu tạo Vector cho ${chunksArray.length} chunks...`);
+        for (let i = 0; i < chunksArray.length; i += BATCH_SIZE) {
+            let batch = chunksArray.slice(i, i + BATCH_SIZE);
             const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-            const totalBatches = Math.ceil(documents.length / BATCH_SIZE);
-            console.log(`[insertData] MongoDB batch ${batchNum}/${totalBatches}`);
+            const totalBatches = Math.ceil(chunksArray.length / BATCH_SIZE);
+            
+            batch = batch.filter(chunk => chunk.content && chunk.content.trim().length > 3);
+            if (batch.length === 0) continue;
 
-            const textsToEmbed = batch.map(doc => doc.pageContent);
-            const embeddings = await embeddingModel.embedDocuments(textsToEmbed);
+            console.log(`[Embedding] Đang xử lý Batch ${batchNum}/${totalBatches}`);
+            const textsToEmbed = batch.map(chunk => chunk.content);
+            
+            let embeddings = [];
+            try {
+                embeddings = await embeddingModel.embedDocuments(textsToEmbed);
+                if (!embeddings || embeddings.length !== textsToEmbed.length) {
+                    throw new Error("API trả về thiếu Vector hoặc mảng rỗng.");
+                }
+            } catch (apiError) {
+                throw new Error(`Thất bại tại Batch ${batchNum} do lỗi Gemini API: ${apiError.message}`);
+            }
+            batch.forEach((chunk, index) => {
+                const metadata = {
+                    document_id: preGeneratedDocumentId.toString(),
+                    chunk_id: chunk.chunk_id,
+                };
+                
+                finalMongoDocs.push({
+                    document_id: metadata.document_id,
+                    chunk_id: metadata.chunk_id,
+                    text: chunk.content,
+                    embedding: embeddings[index] 
+                });
 
-            const mongoDocs = batch.map((doc, index) => ({
-                document_id: doc.metadata.document_id,
-                chunk_id: doc.metadata.chunk_id,
-                text: doc.pageContent,
-                embedding: embeddings[index]
-            }));
-
-            await nativeCollection.insertMany(mongoDocs, { session });
-        }
-        console.log("[insertData] MongoDB done");
-        for (const doc of documents) {
-            await elasticClient.index({
-                index: "sotay",
-                document: { content: doc.pageContent, metadata: doc.metadata },
+                finalElasticDocs.push({
+                    content: chunk.content,
+                    metadata: metadata
+                });
             });
+            if (batchNum < totalBatches) {
+                console.log(` Batch ${batchNum} thành công. Đang nghỉ 15 giây để làm mát API...`);
+                await delay(45000); 
+            }
         }
-        await elasticClient.indices.refresh({ index: "sotay" });
-        await session.commitTransaction();
-        return res.status(200).json({
-            status: "success",
-            message: "Upload và trích xuất thành công!",
-            document: document,
-            total_chunks: chunksArray.length
-        });
+        
+        console.log(`[Embedding] Đã tạo Vector thành công 100% cho ${finalMongoDocs.length} chunks!`);
+
+        
+        const session = await mongoose.startSession();
+        try {
+            session.startTransaction();
+
+            await documentModel.create([{
+                _id: preGeneratedDocumentId, 
+                name: body.name,
+                cloudinary_link: uploadedCloudinaryFile.secure_url,
+                cloudinary_public_id: uploadedCloudinaryFile.public_id
+            }], { session });
+
+            // Lưu ý: Đảm bảo tên collection 'chunks' là đúng với Database của bạn
+            const nativeCollection = mongoose.connection.collection('chunks'); 
+            if (finalMongoDocs.length > 0) {
+                await nativeCollection.insertMany(finalMongoDocs, { session });
+            }
+
+            for (const doc of finalElasticDocs) {
+                await elasticClient.index({
+                    index: "sotay",
+                    document: doc,
+                });
+            }
+            await elasticClient.indices.refresh({ index: "sotay" });
+
+            await session.commitTransaction();
+
+            return res.status(200).json({
+                status: "success",
+                message: "Upload và trích xuất thành công!",
+                document: { _id: preGeneratedDocumentId, name: body.name },
+                total_chunks: finalMongoDocs.length
+            });
+
+        } catch (dbError) {
+            console.error("[Transaction Lỗi] Database thất bại, đang Rollback:", dbError.message);
+            await session.abortTransaction();
+            throw dbError; 
+        } finally {
+            await session.endSession();
+        }
+
     } catch (err) {
-        console.error("[indexing] Error:", err.message);
-        await session.abortTransaction();
+        console.error("[indexing] Tổng quan lỗi:", err.message);
+        
         if (uploadedCloudinaryFile && uploadedCloudinaryFile.public_id) {
             try {
                 await cloudinary.uploader.destroy(uploadedCloudinaryFile.public_id);
-                console.log("[Rollback] Đã xóa file trên Cloudinary do lỗi hệ thống");
+                console.log("[Rollback] Đã xóa file Cloudinary do lỗi hệ thống");
             } catch (cloudErr) {
-                console.error("[Rollback Failed] Không thể xóa file Cloudinary:", cloudErr.message);
+                console.error("[Rollback Lỗi] Không thể xóa file Cloudinary:", cloudErr.message);
             }
         }
+        
         return res.status(500).json({ 
             status: "error", 
-            message: "Lưu file thành công nhưng trích xuất Chunk thất bại", 
+            message: "Xử lý tài liệu thất bại", 
             error: err.message 
         });
 
     } finally {
-        await session.endSession();
         if (req.file && fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
         }
@@ -150,18 +191,25 @@ exports.getDocuments = async (req, res) => {
     }
 }
 //xong
+
+
 exports.deleteDocument = async (req, res) => {
-    const session = mongoClient.startSession();
+    const session = await mongoose.startSession();
     try {
         session.startTransaction();
         const { id } = req.body;
+        
+        // Dùng session với Mongoose
         const document = await documentModel.findById(id).session(session);
+        
         if (!document) {
+            await session.abortTransaction();
             return res.status(404).json({ status: "error", message: "Document not found" });
         }
-        await _collection.deleteMany({ "document_id": id }, { session });
+        const nativeCollection = mongoose.connection.collection('chunks');
+        await nativeCollection.deleteMany({ "document_id": id }, { session });
         console.log(`[deleteDocument] Đã xóa chunks của document ${id} trong MongoDB`);
-
+        // Xóa trên Elasticsearch
         const indexExists = await elasticClient.indices.exists({ index: "sotay" });
         if (indexExists) {
             await elasticClient.deleteByQuery({
@@ -175,7 +223,7 @@ exports.deleteDocument = async (req, res) => {
             await elasticClient.indices.refresh({ index: "sotay" });
             console.log(`[deleteDocument] Đã xóa chunks của document ${id} trong Elasticsearch`);
         }
-        await documentModel.findByIdAndDelete(id).session(session);
+        await documentModel.findByIdAndDelete(id).session(session); 
         await ChatModel.deleteMany({ documentId: id }, { session });
         await session.commitTransaction();
         return res.status(200).json({
