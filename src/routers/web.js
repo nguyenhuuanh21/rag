@@ -48,7 +48,7 @@ router.put("/admin/update", verifyAccessTokenAdmin, DocumentController.updateDoc
 router.get("/admin/chunks/:documentId", verifyAccessTokenAdmin, DocumentController.getChunksByDocument);
 router.put("/admin/chunks/:documentId/:chunkId", verifyAccessTokenAdmin, DocumentController.updateChunk);
 router.delete("/admin/chunks/:documentId/:chunkId", verifyAccessTokenAdmin, DocumentController.deleteChunk);
-
+router.post("/admin/chunks/:documentId/", verifyAccessTokenAdmin, DocumentController.addChunk);
 
 
 module.exports = router;
