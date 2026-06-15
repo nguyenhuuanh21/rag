@@ -25,6 +25,10 @@ reader = easyocr.Reader(
 )
 
 def is_noise_line(line):
+    """
+    Kiểm tra xem một dòng văn bản có phải là dòng "rác" hay không.
+    Dòng rác thường là header, footer, số trang, hoặc các ký tự lặp lại vô nghĩa (như dấu chấm nối trong mục lục).
+    """
     line = line.strip()
 
     noise_patterns = [
@@ -42,6 +46,10 @@ def is_noise_line(line):
     )
 
 def clean_text(text):
+    """
+    Làm sạch một khối văn bản: Chuẩn hóa ký tự xuống dòng (\r\n thành \n), 
+    gộp các khoảng trắng thừa thành 1 dấu cách, và loại bỏ hoàn toàn các dòng rác.
+    """
     text = re.sub(r"\r\n", "\n", text)
     text = re.sub(r"[ \t]+", " ", text)
 
@@ -61,11 +69,19 @@ def clean_text(text):
     return "\n".join(lines).strip()
 
 def normalize_line(line):
+    """
+    Chuẩn hóa một dòng văn bản đơn lẻ: Xóa khoảng trắng ở 2 đầu 
+    và loại bỏ các ký tự đánh dấu tiêu đề của Markdown (như #, ##) nếu có.
+    """
     line = line.strip()
     line = re.sub(r"^#{1,6}\s+", "", line).strip()
     return line
 
 def is_roman_heading(line):
+    """
+    Kiểm tra xem dòng hiện tại có phải là một tiêu đề được đánh số La Mã hay không.
+    (Ví dụ: "I. Mở đầu", "IV. Kết luận").
+    """
     line = normalize_line(line)
 
     return re.match(
@@ -75,6 +91,10 @@ def is_roman_heading(line):
     )
 
 def is_table_heading(line):
+    """
+    Kiểm tra xem dòng hiện tại có khớp chính xác với định dạng thẻ tiêu đề bảng nội bộ hay không.
+    (Ví dụ: "[PAGE 1 - TABLE 2]").
+    """
     line = normalize_line(line)
 
     return re.match(
@@ -84,6 +104,10 @@ def is_table_heading(line):
     )
 
 def is_table_node_title(title):
+    """
+    Kiểm tra mở rộng xem một chuỗi có phải là tiêu đề của bảng hay không.
+    Bao gồm cả thẻ nội bộ "[PAGE...]" và các tiêu đề bắt đầu bằng chữ "BẢNG" (VD: "BẢNG 1.2").
+    """
     title = normalize_line(title)
 
     return bool(
@@ -92,6 +116,10 @@ def is_table_node_title(title):
     )
 
 def rect_overlap_area(a, b):
+    """
+    Tính diện tích phần giao nhau (overlap) giữa 2 hình chữ nhật (bounding boxes).
+    Nếu 2 hình không chạm nhau, trả về 0.
+    """
     ax0, ay0, ax1, ay1 = a
     bx0, by0, bx1, by1 = b
 
@@ -106,10 +134,17 @@ def rect_overlap_area(a, b):
     return (x1 - x0) * (y1 - y0)
 
 def rect_area(rect):
+    """
+    Tính tổng diện tích của một hình chữ nhật dựa trên tọa độ (x0, y0, x1, y1).
+    """
     x0, y0, x1, y1 = rect
     return max(0, x1 - x0) * max(0, y1 - y0)
 
 def is_block_inside_table(block_bbox, table_bbox, overlap_threshold=0.35):
+    """
+    Xác định xem một khối văn bản có nằm bên trong khu vực của một bảng biểu hay không.
+    Điều kiện: Diện tích phần giao nhau chiếm từ 35% (overlap_threshold) tổng diện tích khối văn bản trở lên.
+    """
     block_area = rect_area(block_bbox)
 
     if block_area <= 0:
@@ -120,6 +155,11 @@ def is_block_inside_table(block_bbox, table_bbox, overlap_threshold=0.35):
     return (overlap / block_area) >= overlap_threshold
 
 def is_text_row_inside_detected_table(row, min_rows_before_stop=2, current_row_count=0):
+    """
+    Phát hiện các hàng (row) bị thư viện nhận diện nhầm thành bảng.
+    Hàm sử dụng biểu thức chính quy để kiểm tra xem nội dung của hàng này có giống với 
+    một câu văn/đoạn văn bản bình thường hay không (dựa trên độ dài, dấu câu, từ khóa tiêu đề).
+    """
     cleaned_cells = []
 
     for cell in row:
@@ -155,6 +195,10 @@ def is_text_row_inside_detected_table(row, min_rows_before_stop=2, current_row_c
     return False
 
 def normalize_overflow_row_as_text(row):
+    """
+    Chuyển đổi một hàng của bảng (đã được xác định là nhận diện nhầm) 
+    trở lại thành một dòng văn bản bình thường bằng cách ghép các ô (cell) lại với nhau.
+    """
     cells = []
 
     for cell in row:
@@ -166,6 +210,12 @@ def normalize_overflow_row_as_text(row):
     return " ".join(cells).strip()
 
 def format_table_as_text(table_data):
+    """
+    Biến đổi dữ liệu bảng (mảng 2 chiều) thành định dạng chuỗi văn bản.
+    - Các ô được ngăn cách bằng ký tự "|".
+    - Bảng được bọc trong tag [TABLE] và [/TABLE].
+    - Nếu phát hiện các hàng text bị nhận diện nhầm, hàm sẽ tách chúng ra và trả về dưới dạng văn bản thừa (overflow_text).
+    """     
     rows = []
     overflow_lines = []
     overflow_started = False
@@ -199,6 +249,10 @@ def format_table_as_text(table_data):
     return table_text, overflow_text
 
 def extract_tables_from_page(page, page_number):
+    """
+    Quét và trích xuất tất cả các bảng biểu có trên một trang PDF cụ thể.
+    Trả về danh sách các object chứa định dạng văn bản của bảng và tọa độ khu vực bảng đó.
+    """
     table_items = []
 
     if not hasattr(page, "find_tables"):
@@ -240,6 +294,10 @@ def extract_tables_from_page(page, page_number):
     return table_items
 
 def extract_non_table_text_blocks(page, table_items):
+    """
+    Lấy toàn bộ các khối văn bản trên trang, sau đó lọc BỎ những khối 
+    nằm đè lên (hoặc nằm trong) khu vực của các bảng biểu đã được tìm thấy trước đó.
+    """
     items = []
     table_bboxes = [item["bbox"] for item in table_items]
 
@@ -274,12 +332,23 @@ def extract_non_table_text_blocks(page, table_items):
     return items
 
 def ocr_page(page):
+    """
+    Giải pháp dự phòng (Fallback): Dùng thư viện ảnh chụp lại trang PDF và đưa qua
+    mô hình AI (EasyOCR) để đọc chữ. Dùng cho các file PDF dạng scan (chỉ chứa hình ảnh).
+    """
     pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
     result = reader.readtext(np.array(img), detail=0, paragraph=True)
     return clean_text("\n".join(result))
 
 def extract_pdf_text(pdf_path):
+    """
+    Hàm điều phối quá trình đọc PDF:
+    - Mở file, lặp qua từng trang.
+    - Lấy bảng, lấy văn bản, gộp chung và sắp xếp chuẩn xác theo tọa độ từ trên xuống, trái qua phải.
+    - Tự động kích hoạt OCR nếu trang có quá ít chữ (< 50 ký tự).
+    Trả về toàn bộ văn bản gốc của file PDF.
+    """
     doc = fitz.open(pdf_path)
     all_text = []
 
@@ -305,6 +374,10 @@ def extract_pdf_text(pdf_path):
     return "\n\n".join(all_text)
 
 def get_text_heading_key(line):
+    """
+    Kiểm tra xem dòng văn bản có bắt đầu bằng các từ khóa phân cấp hành chính/pháp lý 
+    (như PHẦN, CHƯƠNG, MỤC, ĐIỀU) hay không. Trả về mẫu regex khớp hoặc None.
+    """
     line = normalize_line(line)
 
     patterns = [
@@ -322,6 +395,11 @@ def get_text_heading_key(line):
     return None
 
 def merge_wrapped_lines(text):
+    """
+    "Hàn gắn" các dòng văn bản bị ngắt xuống dòng vô lý (do chạm mép lề tài liệu gốc).
+    Hàm phân tích dấu ngắt câu ở cuối dòng trước và đặc tính của dòng sau để quyết định 
+    xem có nên gộp chúng lại thành một câu hoàn chỉnh hay không.
+    """
     lines = text.splitlines()
     merged = []
     in_table = False
@@ -370,6 +448,11 @@ def merge_wrapped_lines(text):
     return "\n".join(merged)
 
 def parse_number_heading(line):
+    """
+    Phân tích một dòng văn bản xem nó có phải là tiêu đề đánh số chỉ mục hay không 
+    (Ví dụ: "1.1.2. Mục đích"). Trả về một object chứa độ sâu của tiêu đề (dot_depth) 
+    và nội dung tiêu đề, hoặc trả về None nếu không khớp.
+    """
     line = normalize_line(line)
 
     match = re.match(r"^(\d+(?:\.\d+)*\.)\s+([A-ZÀ-Ỹ].+)$", line)
@@ -400,6 +483,10 @@ def parse_number_heading(line):
     }
 
 def create_node(title, level):
+    """
+    Tạo một Nút (Node) mới để gắn vào cây cấu trúc tài liệu.
+    Mỗi Node đại diện cho một tiêu đề (VD: Chương 1) và sẽ chứa các văn bản con của nó.
+    """
     return {
         "title": title,
         "level": level,
@@ -409,10 +496,18 @@ def create_node(title, level):
     }
 
 def add_child(parent, child):
+    """
+    Thiết lập liên kết cha-con giữa 2 Node trong cây cấu trúc.
+    """
     child["parent"] = parent
     parent["children"].append(child)
 
 def build_heading_tree(text):
+    """
+    Hàm cốt lõi: Đọc văn bản từ trên xuống dưới và tự động phân loại, sắp xếp 
+    các đoạn văn bản vào một cấu trúc Cây (Tree) dựa trên cấp bậc của các tiêu đề.
+    (Ví dụ: Document -> Chương 1 -> Mục 1.1 -> [Văn bản]).
+    """
     root = create_node("Document", 0)
     stack = [root]
 
@@ -478,6 +573,10 @@ def build_heading_tree(text):
     return root
 
 def node_to_text(node):
+    """
+    Đệ quy lấy toàn bộ văn bản nội dung của một Node hiện tại
+    và cộng dồn văn bản của tất cả các Node con cháu của nó.
+    """
     parts = []
 
     own_text = "\n".join(node["content_lines"]).strip()
@@ -492,6 +591,11 @@ def node_to_text(node):
     return "\n\n".join(parts).strip()
 
 def get_node_path(node):
+    """
+    Lấy đường dẫn phân cấp từ gốc đến Node hiện tại.
+    (Ví dụ: Trả về mảng ["Document", "Chương 1", "Mục 1.1"]). 
+    Dùng để làm metadata lưu ngữ cảnh.
+    """
     path = []
     cur = node
 
@@ -502,6 +606,10 @@ def get_node_path(node):
     return list(reversed(path))
 
 def get_nearest_non_table_parent_title(node):
+    """
+    Leo ngược lên cây để tìm tiêu đề của Node cha gần nhất mà KHÔNG PHẢI là một bảng biểu.
+    Dùng để gắn tên chương/mục vào nội dung của bảng giúp AI giữ được ngữ cảnh.
+    """
     cur = node.get("parent")
 
     while cur and cur.get("title") != "Document":
@@ -513,9 +621,17 @@ def get_nearest_non_table_parent_title(node):
     return ""
 
 def contains_table_block(text):
+    """
+    Kiểm tra nhanh xem đoạn văn bản này có chứa tag [TABLE] hay không.
+    """
     return "[TABLE]" in text and "[/TABLE]" in text
 
 def split_long_text(text):
+    """
+    Hàm chia nhỏ văn bản (Chunking) với giới hạn MAX_CHARS:
+    - Nếu đoạn text có chứa bảng, bóc tách bảng ra giữ nguyên vẹn (không bao giờ cắt đôi bảng), chỉ cắt text xung quanh.
+    - Nếu là text bình thường, cắt theo từng đoạn văn (paragraph) và giữ lại 1 phần gối đầu (overlap) để không mất ngữ cảnh.
+    """
     text = text.strip()
 
     if not text:
@@ -582,6 +698,12 @@ def split_long_text(text):
     return chunks
 
 def emit_chunks_from_node(node):
+    """
+    Duyệt đệ quy qua cây cấu trúc tài liệu. 
+    Lấy văn bản của từng Node, nếu dài quá thì gọi hàm `split_long_text` để cắt.
+    Đặc biệt: Tự động chèn tên tiêu đề của Node cha lên đầu mỗi đoạn chunk bị cắt 
+    để đảm bảo khi lưu trữ độc lập, đoạn chunk đó vẫn mang đủ ngữ cảnh.
+    """
     chunks = []
 
     if node["title"] == "Document":
@@ -658,6 +780,14 @@ def emit_chunks_from_node(node):
 
 
 def build_chunks(input_file):
+    """
+    Hàm tổng hợp toàn bộ quy trình:
+    1. Trích xuất text từ PDF.
+    2. Nối dòng đứt gãy.
+    3. Dựng cây cấu trúc.
+    4. Cắt thành các chunks nhỏ.
+    5. Đóng gói kết quả thành định dạng danh sách các Dictionary chuẩn bị xuất ra JSON.
+    """
     text = extract_pdf_text(input_file)
     text = merge_wrapped_lines(text)
 

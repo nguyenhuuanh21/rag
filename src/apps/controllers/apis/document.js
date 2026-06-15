@@ -61,7 +61,7 @@ exports.indexing = async (req, res) => {
         if (startIndex === -1) throw new Error("Không tìm thấy mảng JSON từ kết quả Python");
         const chunksArray = JSON.parse(stdout.substring(startIndex));
         
-        const BATCH_SIZE = 12; 
+        const BATCH_SIZE = 10; 
         let finalMongoDocs = [];
         let finalElasticDocs = [];
 
@@ -105,8 +105,8 @@ exports.indexing = async (req, res) => {
                 });
             });
             if (batchNum < totalBatches) {
-                console.log(` Batch ${batchNum} thành công. Đang nghỉ 15 giây để làm mát API...`);
-                await delay(45000); 
+                console.log(` Batch ${batchNum} thành công. Đang nghỉ 45 giây để làm mát API...`);
+                await delay(8000); 
             }
         }
         
@@ -124,7 +124,6 @@ exports.indexing = async (req, res) => {
                 cloudinary_public_id: uploadedCloudinaryFile.public_id
             }], { session });
 
-            // Lưu ý: Đảm bảo tên collection 'chunks' là đúng với Database của bạn
             const nativeCollection = mongoose.connection.collection('chunks'); 
             if (finalMongoDocs.length > 0) {
                 await nativeCollection.insertMany(finalMongoDocs, { session });
@@ -246,6 +245,17 @@ exports.updateDocument = async (req, res) => {
         if (!document) {
             return res.status(404).json({ status: "error", message: "Document not found" });
         }
+          const existedDocument = await documentModel.findOne({
+            name,
+            _id: { $ne: id }
+        });
+
+        if (existedDocument) {
+            return res.status(400).json({
+                status: "error",
+                message: "Tên tài liệu đã tồn tại"
+            });
+        }
         document.name = name;
         await document.save();
         return res.status(200).json({
@@ -262,7 +272,14 @@ exports.updateDocument = async (req, res) => {
 exports.getChunksByDocument = async (req, res) => {
     try {
         const { documentId } = req.params;
-        const chunks = await _collection.find({ "document_id": documentId }).toArray();
+        // const chunks = await _collection.find({ "document_id": documentId }).toArray();
+        const chunks = await _collection.find({ "document_id": documentId })
+            .project({ 
+                embedding: 0, // LOẠI BỎ mảng vector nặng nề, chỉ lấy text và metadata
+                // vector: 0  // Mở khóa nếu trường vector của bạn tên là 'vector'
+            })
+            // .limit(100) // Tùy chọn: Thêm limit để phân trang nếu file cực kỳ lớn
+            .toArray();
         return res.status(200).json({
             status: "success",
             total: chunks.length,

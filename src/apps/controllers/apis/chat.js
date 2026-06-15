@@ -256,7 +256,6 @@ exports.chatHybrid = async (req, res) => {
 
         const t1 = Date.now();
         const [elasticResults, vectorResults] = await Promise.all([
-            // BM25: must ≥50% tokens + phrase boost
             elasticClient.search({
                 index: "sotay",
                 size: TOP_ELASTIC,

@@ -9,6 +9,7 @@ app.use(cors({
     origin: (origin, callback) => {
     if (!origin || [
       "http://localhost:5173",
+      "http://localhost:5174",
       'https://rag-hdkvpcupz-anhs-projects-68c67cb7.vercel.app',
       'https://rag-fe-theta.vercel.app',
       'https://rag-fe-admin.vercel.app',
